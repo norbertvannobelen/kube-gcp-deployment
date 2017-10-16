@@ -641,16 +641,15 @@ Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 After=crio.service
 Requires=crio.service
 
-
 [Service]
 ExecStart=/usr/local/bin/kubelet \\
---v=2 \\
---experimental-mounter-path=/home/kubernetes/containerized_mounter/mounter \\
---experimental-check-node-capabilities-before-mount=true \\
---enable-debugging-handlers=true \\
---hairpin-mode=promiscuous-bridge \\
---network-plugin=kubenet \\
---node-labels=beta.kubernetes.io/fluentd-ds-ready=true \\
+  --v=2 \\
+  --experimental-mounter-path=/home/kubernetes/containerized_mounter/mounter \\
+  --experimental-check-node-capabilities-before-mount=true \\
+  --enable-debugging-handlers=true \\
+  --hairpin-mode=promiscuous-bridge \\
+  --network-plugin=kubenet \\
+  --node-labels=beta.kubernetes.io/fluentd-ds-ready=true \\
   --allow-privileged=true \\
   --cluster-dns=${DNS_SERVER_IP} \\
   --cluster-domain=cluster.local \\
