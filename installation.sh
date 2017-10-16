@@ -4,15 +4,16 @@ REGION=${Region:-us-east1}
 ZONE=${Zone:-us-east1-c}
 MASTER_NODE_PREFIX=${MasterNodePrefix:-kubemaster}
 WORKER_NODE_PREFIX=${WorkerNodePrefix:-kubeworker}
-NUMBER_OF_MASTERS=3
-NUMBER_OF_WORKERS=2
+NUMBER_OF_MASTERS=${NumberOfMasters: -3}
+NUMBER_OF_WORKERS=${NumberOfWorkers: -2}
 WORKER_TAGS=${WorkerTags:-kubernetes-worker}
 CLUSTER_NAME=${ClusterName:-kubernetes-17}
 CLUSTER_CIDR=10.200.0.0/16
 IP_NET=10.240.0.0/16
 NODE_INSTALLATION_USER=ubuntu
 MASTER_NODE_SIZE=${MasterNodeSize:-n1-standard-1}
-KUBERNETES_VERSION=v1.8.0
+WORKER_NODE_SIZE=${WorkerNodeSize:-n1-standard-8}
+KUBERNETES_VERSION=v1.8.1
 DNS_SERVER_IP=10.32.0.10
 DNS_DOMAIN=cluster.local
 gcloud config set compute/region ${REGION}
@@ -54,18 +55,18 @@ function setupNetworkGeneral() {
 
   gcloud compute firewall-rules create ${CLUSTER_NAME}-allow-internal \
     --allow tcp,udp,icmp \
-    --network $CLUSTER_NAME \
+    --network ${CLUSTER_NAME} \
     --source-ranges $IP_NET,$CLUSTER_CIDR
 
 # The API server will be accessible through a load balancer this way
   gcloud compute firewall-rules create ${CLUSTER_NAME}-allow-external \
     --allow tcp:22,tcp:6443,icmp \
-    --network $CLUSTER_NAME \
+    --network ${CLUSTER_NAME} \
     --source-ranges 0.0.0.0/0
 
   gcloud compute firewall-rules create ${CLUSTER_NAME}-allow-health-checks \
     --allow tcp:8080 \
-    --network $CLUSTER_NAME \
+    --network ${CLUSTER_NAME} \
     --source-ranges 209.85.204.0/22,209.85.152.0/22,35.191.0.0/16
 
   gcloud compute addresses create $CLUSTER_NAME --region $(gcloud config get-value compute/region)
@@ -234,7 +235,7 @@ function createWorkerNode() {
     --can-ip-forward \
     --image-family ubuntu-1604-lts \
     --image-project ubuntu-os-cloud \
-    --machine-type n1-standard-8 \
+    --machine-type ${WORKER_NODE_SIZE} \
     --metadata pod-cidr=10.200.${i}.0/24 \
     --scopes compute-rw,storage-ro,service-management,service-control,logging-write,monitoring \
     --subnet ${CLUSTER_NAME} \
@@ -328,6 +329,16 @@ function configureMaster() {
 
   INTERNAL_IP=$(gcloud compute instances describe ${instance} --format 'value(networkInterfaces[0].networkIP)')
 
+  cat > gce.conf <<EOF
+[global]
+project-id = adacado-kube-upgrade-17-test
+network-project-id = adacado-kube-upgrade-17-test
+network-name = ${CLUSTER_NAME}
+subnetwork-name = ${CLUSTER_NAME}
+node-tags = ${WORKER_NODE_PREFIX}
+node-instance-prefix = ${WORKER_NODE_PREFIX}
+EOF
+
   cat > kube-apiserver.service <<EOF
 [Unit]
 Description=Kubernetes API Server
@@ -335,37 +346,45 @@ Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 
 [Service]
 ExecStart=/usr/local/bin/kube-apiserver \\
-  --admission-control=NamespaceLifecycle,NodeRestriction,LimitRanger,ServiceAccount,DefaultStorageClass,ResourceQuota \\
-  --advertise-address=${INTERNAL_IP} \\
+  --v=2 \\
+  --cloud-config=/etc/gce.conf \\
+  --address=127.0.0.1 \\
   --allow-privileged=true \\
+  --cloud-provider=gce \\
+  --client-ca-file=/var/lib/kubernetes/ca.pem \\
+  --etcd-cafile=/var/lib/kubernetes/ca.pem \\
+  --etcd-certfile=/var/lib/kubernetes/kubernetes.pem \\
+  --etcd-keyfile=/var/lib/kubernetes/kubernetes-key.pem \\
+  --etcd-servers=${ETCD_CLUSTER} \\
+  --kubelet-certificate-authority=/var/lib/kubernetes/ca.pem \\
+  --kubelet-client-certificate=/var/lib/kubernetes/kubernetes.pem \\
+  --kubelet-client-key=/var/lib/kubernetes/kubernetes-key.pem \\
+  --kubelet-https=true \\
+  --service-account-key-file=/var/lib/kubernetes/ca-key.pem \\
+  --service-cluster-ip-range=10.32.0.0/16 \\
+  --service-node-port-range=30000-32767 \\
+  --storage-backend=etcd3 \\
+  --target-ram-mb=180 \\
+  --etcd-quorum-read=false \\
+  --admission-control=Initializers,NamespaceLifecycle,LimitRanger,ServiceAccount,PersistentVolumeLabel,DefaultStorageClass,DefaultTolerationSeconds,NodeRestriction,Priority,ResourceQuota \\
+  --feature-gates=ExperimentalCriticalPodAnnotation=true \\
+  --advertise-address=${INTERNAL_IP}\\
+  --authorization-mode=Node,RBAC \\
   --apiserver-count=3 \\
   --audit-log-maxage=30 \\
   --audit-log-maxbackup=3 \\
   --audit-log-maxsize=100 \\
   --audit-log-path=/var/log/audit.log \\
-  --authorization-mode=Node,RBAC \\
+  --allow-privileged=true \\
   --bind-address=0.0.0.0 \\
-  --client-ca-file=/var/lib/kubernetes/ca.pem \\
   --enable-swagger-ui=true \\
-  --etcd-cafile=/var/lib/kubernetes/ca.pem \\
-  --etcd-certfile=/var/lib/kubernetes/kubernetes.pem \\
-  --etcd-keyfile=/var/lib/kubernetes/kubernetes-key.pem \\
-  --etcd-servers=${ETCD_CLUSTER} \\
   --event-ttl=1h \\
   --experimental-encryption-provider-config=/var/lib/kubernetes/encryption-config.yaml \\
   --insecure-bind-address=0.0.0.0 \\
-  --kubelet-certificate-authority=/var/lib/kubernetes/ca.pem \\
-  --kubelet-client-certificate=/var/lib/kubernetes/kubernetes.pem \\
-  --kubelet-client-key=/var/lib/kubernetes/kubernetes-key.pem \\
-  --kubelet-https=true \\
   --runtime-config=rbac.authorization.k8s.io/v1alpha1 \\
-  --service-account-key-file=/var/lib/kubernetes/ca-key.pem \\
-  --service-cluster-ip-range=10.32.0.0/16 \\
-  --service-node-port-range=30000-32767 \\
   --tls-ca-file=/var/lib/kubernetes/ca.pem \\
   --tls-cert-file=/var/lib/kubernetes/kubernetes.pem \\
-  --tls-private-key-file=/var/lib/kubernetes/kubernetes-key.pem \\
-  --v=2
+  --tls-private-key-file=/var/lib/kubernetes/kubernetes-key.pem
 Restart=on-failure
 RestartSec=5
 
@@ -381,17 +400,23 @@ Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 
 [Service]
 ExecStart=/usr/local/bin/kube-controller-manager \\
-  --address=0.0.0.0 \\
+  --v=2 \\
+  --cloud-config=/etc/gce.conf \\
+  --use-service-account-credentials \\
+  --cloud-provider=gce \\
+  --root-ca-file=/var/lib/kubernetes/ca.pem \\
+  --service-account-private-key-file=/var/lib/kubernetes/ca-key.pem \\
+  --service-cluster-ip-range=10.32.0.0/16 \\
   --cluster-cidr=${CLUSTER_CIDR} \\
   --cluster-name=kubernetes \\
   --cluster-signing-cert-file=/var/lib/kubernetes/ca.pem \\
   --cluster-signing-key-file=/var/lib/kubernetes/ca-key.pem \\
+  --allocate-node-cidrs=true \\
+  --feature-gates=ExperimentalCriticalPodAnnotation=true \\
+  --flex-volume-plugin-dir=/etc/srv/kubernetes/kubelet-plugins/volume/exec\\
+  --address=0.0.0.0 \\
   --leader-elect=true \\
-  --master=http://${INTERNAL_IP}:8080 \\
-  --root-ca-file=/var/lib/kubernetes/ca.pem \\
-  --service-account-private-key-file=/var/lib/kubernetes/ca-key.pem \\
-  --service-cluster-ip-range=10.32.0.0/16 \\
-  --v=2
+  --master=http://${INTERNAL_IP}:8080 
 Restart=on-failure
 RestartSec=5
 
@@ -408,6 +433,7 @@ Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 [Service]
 ExecStart=/usr/local/bin/kube-scheduler \\
   --leader-elect=true \\
+  --feature-gates=ExperimentalCriticalPodAnnotation=true \\
   --master=http://${INTERNAL_IP}:8080 \\
   --v=2
 Restart=on-failure
@@ -417,8 +443,9 @@ RestartSec=5
 WantedBy=multi-user.target
 EOF
 
-  ${GSCP} encryption-config.yaml kube-apiserver.service kube-scheduler.service kube-controller-manager.service ${NODE_INSTALLATION_USER}@${MASTER_NODE_PREFIX}${i}:~/
+  ${GSCP} gce.conf encryption-config.yaml kube-apiserver.service kube-scheduler.service kube-controller-manager.service ${NODE_INSTALLATION_USER}@${MASTER_NODE_PREFIX}${i}:~/
   ${GSSH}${instance} -- sudo mv kube-apiserver.service kube-scheduler.service kube-controller-manager.service /etc/systemd/system/
+  ${GSSH}${instance} -- sudo mv gce.conf /etc/
   ${GSSH}${instance} -- sudo systemctl daemon-reload
   ${GSSH}${instance} -- sudo systemctl enable kube-apiserver kube-controller-manager kube-scheduler
   ${GSSH}${instance} -- sudo systemctl start kube-apiserver kube-controller-manager kube-scheduler
@@ -476,6 +503,10 @@ EOF
 
 # The master IP addresses (internal ips) are required for certificate creation. This function retrieves the IPs
 function fetchMasterIps() {
+  unset MASTER_LIST
+  unset MASTER_IPS
+  unset INITIAL_ETCD_CLUSTER
+  unset ETCD_CLUSTER
   for i in $(seq 1 1 ${NUMBER_OF_MASTERS}); do
     MASTER_IP=$(gcloud compute instances describe ${MASTER_NODE_PREFIX}${i} --format 'value(networkInterfaces[0].networkIP)')
     if [ -n "${MASTER_IPS}" ]
@@ -517,7 +548,8 @@ function installWorkerSoftware() {
     btrfs-tools git golang-go libassuan-dev libdevmapper-dev libglib2.0-dev \
     libc6-dev libgpgme11-dev libgpg-error-dev libseccomp-dev libselinux1-dev \
     pkg-config runc skopeo-containers \
-    socat libgpgme11 libostree-1-1 conntrack
+    socat libgpgme11 libostree-1-1 conntrack \
+    nfs-common
   ${GSSH}${instance} -- wget -q --show-progress --https-only --timestamping \
     https://github.com/containernetworking/plugins/releases/download/v0.6.0/cni-plugins-amd64-v0.6.0.tgz \
     https://github.com/opencontainers/runc/releases/download/v1.0.0-rc4/runc.amd64 \
@@ -609,8 +641,16 @@ Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 After=crio.service
 Requires=crio.service
 
+
 [Service]
 ExecStart=/usr/local/bin/kubelet \\
+--v=2 \\
+--experimental-mounter-path=/home/kubernetes/containerized_mounter/mounter \\
+--experimental-check-node-capabilities-before-mount=true \\
+--enable-debugging-handlers=true \\
+--hairpin-mode=promiscuous-bridge \\
+--network-plugin=kubenet \\
+--node-labels=beta.kubernetes.io/fluentd-ds-ready=true \\
   --allow-privileged=true \\
   --cluster-dns=${DNS_SERVER_IP} \\
   --cluster-domain=cluster.local \\
@@ -620,14 +660,13 @@ ExecStart=/usr/local/bin/kubelet \\
   --image-pull-progress-deadline=2m \\
   --image-service-endpoint=unix:///var/run/crio.sock \\
   --kubeconfig=/var/lib/kubelet/kubeconfig \\
-  --network-plugin=cni \\
   --pod-cidr=${POD_CIDR} \\
   --register-node=true \\
   --require-kubeconfig \\
   --runtime-request-timeout=10m \\
   --tls-cert-file=/var/lib/kubelet/${instance}.pem \\
   --tls-private-key-file=/var/lib/kubelet/${instance}-key.pem \\
-  --v=2
+  --cloud-provider=gce 
 Restart=on-failure
 RestartSec=5
 
@@ -648,6 +687,10 @@ Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 
 [Service]
 ExecStart=/usr/local/bin/kube-proxy \\
+  --resource-container= \\
+  --feature-gates=ExperimentalCriticalPodAnnotation=true \\
+  --iptables-sync-period=1m \\
+  --iptables-min-sync-period=10s \\
   --cluster-cidr=${CLUSTER_CIDR} \\
   --master=https://${KUBERNETES_PUBLIC_ADDRESS}:6443 \\
   --kubeconfig=/var/lib/kube-proxy/kubeconfig \\
@@ -780,7 +823,6 @@ function addKubeComponents() {
   kubectl create -f https://raw.githubusercontent.com/giantswarm/kubernetes-prometheus/master/manifests/prometheus/deployment.yaml
   kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/master/src/deploy/recommended/kubernetes-dashboard.yaml
   kubectl apply -f https://raw.githubusercontent.com/kubernetes/heapster/master/deploy/kube-config/influxdb/heapster.yaml
-
 }
 
 function setupRBAC() {
