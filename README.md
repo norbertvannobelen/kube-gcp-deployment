@@ -4,6 +4,13 @@ This repo contains a kubernetes Google Cloud Platform (GCP) deployment script ba
 
 The scripts are created such that they are readable and limited in use. They are meant to give insight and provide the user with a chance to create a working cluster quick.
 
+Main differences with kubernetes the hard way:
+
+* GCE use is a bit more advanced: No fixed IP addresses coded in the for loops: Machines are created on demand and than queried for their settings;
+* cloud provider is configured so that GCE functionalities (like mounting a disk in a deployment) works;
+* In the addition of kube components a more usuable list is added;
+* RBAC (in this script a beta setup) has been added.
+
 # Usage
 
 Initialize a GCE on the project you would like to deploy a kubernetes environment in.
@@ -17,8 +24,14 @@ Set environment variables:
 * NumberOfMasters
 * NumberOfWorkers
 * WorkerTags
+* ClusterName
+* MasterNodeSize
+* WorkerNodeSize
 
-After that execute initialize.sh
+After that execute:
+
+    source initialize.sh
+    installCluster
 
 # Create more workers
 
