@@ -11,6 +11,17 @@ Main differences with kubernetes the hard way:
 * In the addition of kube components a more usuable list is added;
 * RBAC (in this script a beta setup) has been added.
 
+# Requirements
+
+Used linux to test:
+* Debian
+* Ubuntu
+* OpenSuse
+
+## Gcloud version
+
+The tested version of gcloud is 180.0.1. Previous versions might work, however it is advised to upgrade to this version.
+
 # Usage
 
 Initialize a GCE on the project you would like to deploy a kubernetes environment in.
@@ -28,7 +39,7 @@ Set environment variables:
 * MasterNodeSize
 * WorkerNodeSize
 
-After that execute:
+Default settings are present for all these, so just running the next steps, works too:
 
     source initialize.sh
     installCluster

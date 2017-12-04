@@ -33,7 +33,7 @@ function fetchKubernetesPublicIp() {
 # For installation purposes, the local linux environment needs tools to create the certificates, and it needs kubectl
 # It only has to be ran once, repeated runs do not damage anything, so no previous run check is present
 function setupInstallEnv() {
-  wget -q --show-progress --https-only --timestamping \
+  wget \
     https://pkg.cfssl.org/R1.2/cfssl_linux-amd64 \
     https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
 
@@ -49,7 +49,7 @@ function setupInstallEnv() {
 # The kubernetes cluster needs several networking rules. Setup all here in one function
 # It only has to be ran once, repeated runs do not damage anything, so no previous run check is present
 function setupNetworkGeneral() {
-  gcloud compute networks create $CLUSTER_NAME --mode custom
+  gcloud compute networks create $CLUSTER_NAME --subnet-mode custom
 
   gcloud compute networks subnets create ${CLUSTER_NAME} --network $CLUSTER_NAME --range $IP_NET
 
