@@ -58,10 +58,12 @@ The code will add the new workers.
 
 Different prefixes can be used. The tags are applied to the nodes created as GCE labels. The tags are also added to the nodes so that they can be used by the Kubernetes scheduler.
 
+# Reset all the installed software and nodes
+
+The scripts resetWorker.sh and resetCluster.sh will reset the complete cluster (ie: Remove, it is gone, use with caution (ie: Do not run in production))
+
 # Additional deployments
 
 The created cluster just runs kubernetes.
 For additional functionalities, run the deployments from the deployment folder.
-
-
 

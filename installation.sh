@@ -4,15 +4,14 @@ REGION=${Region:-us-east1}
 ZONE=${Zone:-us-east1-c}
 MASTER_NODE_PREFIX=${MasterNodePrefix:-kubemaster}
 WORKER_NODE_PREFIX=${WorkerNodePrefix:-kubeworker}
-NUMBER_OF_MASTERS=${NumberOfMasters: -3}
-NUMBER_OF_WORKERS=${NumberOfWorkers: -2}
+NUMBER_OF_MASTERS=1
+NUMBER_OF_WORKERS=1
 WORKER_TAGS=${WorkerTags:-kubernetes-worker}
 CLUSTER_NAME=${ClusterName:-kubernetes-17}
 CLUSTER_CIDR=10.200.0.0/16
 IP_NET=10.240.0.0/16
 NODE_INSTALLATION_USER=ubuntu
 MASTER_NODE_SIZE=${MasterNodeSize:-n1-standard-1}
-WORKER_NODE_SIZE=${WorkerNodeSize:-n1-standard-8}
 KUBERNETES_VERSION=v1.8.1
 DNS_SERVER_IP=10.32.0.10
 DNS_DOMAIN=cluster.local
@@ -49,7 +48,7 @@ function setupInstallEnv() {
 # The kubernetes cluster needs several networking rules. Setup all here in one function
 # It only has to be ran once, repeated runs do not damage anything, so no previous run check is present
 function setupNetworkGeneral() {
-  gcloud compute networks create $CLUSTER_NAME --subnet-mode custom
+  gcloud compute networks create $CLUSTER_NAME --mode custom
 
   gcloud compute networks subnets create ${CLUSTER_NAME} --network $CLUSTER_NAME --range $IP_NET
 
@@ -235,7 +234,7 @@ function createWorkerNode() {
     --can-ip-forward \
     --image-family ubuntu-1604-lts \
     --image-project ubuntu-os-cloud \
-    --machine-type ${WORKER_NODE_SIZE} \
+    --machine-type n1-standard-8 \
     --metadata pod-cidr=10.200.${i}.0/24 \
     --scopes compute-rw,storage-ro,service-management,service-control,logging-write,monitoring \
     --subnet ${CLUSTER_NAME} \
@@ -245,7 +244,7 @@ function createWorkerNode() {
 # The function createWorkerNode paves the worker:
 # - Create the nodes
 function createWorkerNodes() {
-  for i in $(seq 1 1 ${NUMBER_OF_WORKERS}); do
+  for i in $(seq 1 ${NUMBER_OF_WORKERS}); do
     instance=${WORKER_NODE_PREFIX}0${i}
     createWorkerNode ${instance} ${i}
   done
@@ -255,7 +254,7 @@ function createWorkerNodes() {
 # TODO: Build a check if the masters already exist: If exist, skip creation
 function createMasterNodes() {
 # Create the master nodes
-  for i in $(seq 1 1 ${NUMBER_OF_MASTERS}); do
+  for i in $(seq 1 ${NUMBER_OF_MASTERS}); do
     gcloud compute instances create ${MASTER_NODE_PREFIX}${i} \
       --boot-disk-type pd-ssd \
       --boot-disk-size 100GB \
@@ -282,7 +281,7 @@ function installMasterCertificates() {
     -profile=kubernetes \
   kubernetes-csr.json | cfssljson -bare kubernetes
 
-  for i in $(seq 1 1 ${NUMBER_OF_MASTERS}); do
+  for i in $(seq 1 ${NUMBER_OF_MASTERS}); do
     ${GSCP} ca.pem ca-key.pem kubernetes-key.pem kubernetes.pem ${NODE_INSTALLATION_USER}@${MASTER_NODE_PREFIX}${i}:~/
 # Distribute the encryption password to the masters
     ${GSCP} encryption-config.yaml ${NODE_INSTALLATION_USER}@${MASTER_NODE_PREFIX}${i}:~/
@@ -370,7 +369,7 @@ ExecStart=/usr/local/bin/kube-apiserver \\
   --feature-gates=ExperimentalCriticalPodAnnotation=true \\
   --advertise-address=${INTERNAL_IP}\\
   --authorization-mode=Node,RBAC \\
-  --apiserver-count=3 \\
+  --apiserver-count=${NUMBER_OF_MASTERS} \\
   --audit-log-maxage=30 \\
   --audit-log-maxbackup=3 \\
   --audit-log-maxsize=100 \\
@@ -507,7 +506,7 @@ function fetchMasterIps() {
   unset MASTER_IPS
   unset INITIAL_ETCD_CLUSTER
   unset ETCD_CLUSTER
-  for i in $(seq 1 1 ${NUMBER_OF_MASTERS}); do
+  for i in $(seq 1 ${NUMBER_OF_MASTERS}); do
     MASTER_IP=$(gcloud compute instances describe ${MASTER_NODE_PREFIX}${i} --format 'value(networkInterfaces[0].networkIP)')
     if [ -n "${MASTER_IPS}" ]
     then
@@ -525,12 +524,12 @@ function fetchMasterIps() {
 }
 
 function installMaster() {
-  for i in $(seq 1 1 ${NUMBER_OF_MASTERS}); do
+  for i in $(seq 1 ${NUMBER_OF_MASTERS}); do
     instance=${MASTER_NODE_PREFIX}${i}
     installEtcd ${instance}
     installMasterSoftware ${instance}
   done
-  for i in $(seq 1 1 ${NUMBER_OF_MASTERS}); do
+  for i in $(seq 1 ${NUMBER_OF_MASTERS}); do
     instance=${MASTER_NODE_PREFIX}${i}
     configureMaster ${instance}
   done
@@ -641,15 +640,16 @@ Documentation=https://github.com/GoogleCloudPlatform/kubernetes
 After=crio.service
 Requires=crio.service
 
+
 [Service]
 ExecStart=/usr/local/bin/kubelet \\
-  --v=2 \\
-  --experimental-mounter-path=/home/kubernetes/containerized_mounter/mounter \\
-  --experimental-check-node-capabilities-before-mount=true \\
-  --enable-debugging-handlers=true \\
-  --hairpin-mode=promiscuous-bridge \\
-  --network-plugin=kubenet \\
-  --node-labels=beta.kubernetes.io/fluentd-ds-ready=true \\
+--v=2 \\
+--experimental-mounter-path=/home/kubernetes/containerized_mounter/mounter \\
+--experimental-check-node-capabilities-before-mount=true \\
+--enable-debugging-handlers=true \\
+--hairpin-mode=promiscuous-bridge \\
+--network-plugin=kubenet \\
+--node-labels=beta.kubernetes.io/fluentd-ds-ready=true \\
   --allow-privileged=true \\
   --cluster-dns=${DNS_SERVER_IP} \\
   --cluster-domain=cluster.local \\
@@ -787,7 +787,7 @@ function addExtraDisk() {
 # - Setup all the software
 function setupWorkerNodes() {
 # Sleep for a few moments to let masters start (TODO: Replace with a ssh check: Once successful on connect, continue)
-  for i in $(seq 1 1 ${NUMBER_OF_WORKERS}); do
+  for i in $(seq 1 ${NUMBER_OF_WORKERS}); do
 # This line still assumes we create workers only once. Needs to be replaced with a bit smarter algorithm
     instance=${WORKER_NODE_PREFIX}0${i}
     createClientCerts ${instance}
@@ -822,6 +822,7 @@ function addKubeComponents() {
   kubectl create -f https://raw.githubusercontent.com/giantswarm/kubernetes-prometheus/master/manifests/prometheus/deployment.yaml
   kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/master/src/deploy/recommended/kubernetes-dashboard.yaml
   kubectl apply -f https://raw.githubusercontent.com/kubernetes/heapster/master/deploy/kube-config/influxdb/heapster.yaml
+
 }
 
 function setupRBAC() {
