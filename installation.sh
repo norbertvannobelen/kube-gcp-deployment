@@ -4,15 +4,17 @@ REGION=${Region:-us-east1}
 ZONE=${Zone:-us-east1-c}
 MASTER_NODE_PREFIX=${MasterNodePrefix:-kubemaster}
 WORKER_NODE_PREFIX=${WorkerNodePrefix:-kubeworker}
-NUMBER_OF_MASTERS=1
-NUMBER_OF_WORKERS=1
+NUMBER_OF_MASTERS=${NumberOfMasters:-1}
+NUMBER_OF_WORKERS=${NumberOfWorkers:-1}
+MASTER_DISK_SIZE=${MasterDiskSize:-20GB}
+WORKER_DISK_SIZE=${WorkerDiskSize:-20GB}
 WORKER_TAGS=${WorkerTags:-kubernetes-worker}
 CLUSTER_NAME=${ClusterName:-kubernetes-17}
 CLUSTER_CIDR=10.200.0.0/16
 IP_NET=10.240.0.0/16
 NODE_INSTALLATION_USER=ubuntu
 MASTER_NODE_SIZE=${MasterNodeSize:-n1-standard-1}
-KUBERNETES_VERSION=v1.8.1
+KUBERNETES_VERSION=v1.8.5
 DNS_SERVER_IP=10.32.0.10
 DNS_DOMAIN=cluster.local
 gcloud config set compute/region ${REGION}
@@ -230,12 +232,12 @@ function createWorkerNode() {
   nodeCount=${2}
   gcloud compute instances create ${instance} \
     --boot-disk-type pd-ssd \
-    --boot-disk-size 100GB \
+    --boot-disk-size ${WORKER_DISK_SIZE} \
     --can-ip-forward \
     --image-family ubuntu-1604-lts \
     --image-project ubuntu-os-cloud \
     --machine-type n1-standard-8 \
-    --metadata pod-cidr=10.200.${i}.0/24 \
+    --metadata pod-cidr=10.200.${nodeCount}.0/24 \
     --scopes compute-rw,storage-ro,service-management,service-control,logging-write,monitoring \
     --subnet ${CLUSTER_NAME} \
     --tags ${CLUSTER_NAME},worker,${WORKER_TAGS} &
@@ -257,7 +259,7 @@ function createMasterNodes() {
   for i in $(seq 1 ${NUMBER_OF_MASTERS}); do
     gcloud compute instances create ${MASTER_NODE_PREFIX}${i} \
       --boot-disk-type pd-ssd \
-      --boot-disk-size 100GB \
+      --boot-disk-size ${MASTER_DISK_SIZE} \
       --can-ip-forward \
       --image-family ubuntu-1604-lts \
       --image-project ubuntu-os-cloud \
@@ -546,7 +548,7 @@ function installWorkerSoftware() {
   ${GSSH}${instance} -- sudo apt-get install -y \
     btrfs-tools git golang-go libassuan-dev libdevmapper-dev libglib2.0-dev \
     libc6-dev libgpgme11-dev libgpg-error-dev libseccomp-dev libselinux1-dev \
-    pkg-config runc skopeo-containers \
+    pkg-config runc skopeo-containers bridge-utils ntp \
     socat libgpgme11 libostree-1-1 conntrack \
     nfs-common
   ${GSSH}${instance} -- wget -q --show-progress --https-only --timestamping \
@@ -648,14 +650,13 @@ ExecStart=/usr/local/bin/kubelet \\
 --experimental-check-node-capabilities-before-mount=true \\
 --enable-debugging-handlers=true \\
 --hairpin-mode=promiscuous-bridge \\
---network-plugin=kubenet \\
+--network-plugin=cni \\
 --node-labels=beta.kubernetes.io/fluentd-ds-ready=true \\
   --allow-privileged=true \\
   --cluster-dns=${DNS_SERVER_IP} \\
   --cluster-domain=cluster.local \\
   --container-runtime=remote \\
   --container-runtime-endpoint=unix:///var/run/crio.sock \\
-  --enable-custom-metrics \\
   --image-pull-progress-deadline=2m \\
   --image-service-endpoint=unix:///var/run/crio.sock \\
   --kubeconfig=/var/lib/kubelet/kubeconfig \\
