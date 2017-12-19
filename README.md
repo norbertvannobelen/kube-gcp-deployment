@@ -81,6 +81,10 @@ The glbc setup is incomplete/broken:
 * No use of kubeconfig flag yet
 * strange enough (most of) the configuration to be written in gcloud by glbc is actually created. The pod behind it, is however not reachable. This might also have its root cause in the bridge initialization.
 
+## HostPort directive is broken in CNI
+
+From https://kubernetes.io/docs/concepts/cluster-administration/network-plugins/ See https://github.com/kubernetes/kubernetes/issues/31307
+
 # Conclusion
 
 Runc at this moment seems unusable.
