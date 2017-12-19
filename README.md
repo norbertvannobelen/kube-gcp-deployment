@@ -67,3 +67,22 @@ The scripts resetWorker.sh and resetCluster.sh will reset the complete cluster (
 The created cluster just runs kubernetes.
 For additional functionalities, run the deployments from the deployment folder.
 
+# Known issues
+
+## The initilization of the network bridge is not dynamic
+
+The network bridge is initialized in 10-bridge.conf. This file is written statically, while at the same time the kube-controller-manager is trying to give out pod-cidr ranges. This then double routing rules in which the ones written by the kube-controller-manager are incorrect. This conflict seems unresolvable with the use of runc: The code in the kubelet which with docker executes a network configuration step, does not do that when using runc. This seems to be a bug making runc unusable in gcloud.
+
+So avoiding the use of kubenet could solve this, however it looks like the addition of the --cloud-provider=gce trigggers multiple changes in the code.
+
+## glbc setup is broken
+
+The glbc setup is incomplete/broken:
+* No use of kubeconfig flag yet
+* strange enough (most of) the configuration to be written in gcloud by glbc is actually created. The pod behind it, is however not reachable. This might also have its root cause in the bridge initialization.
+
+# Conclusion
+
+Runc at this moment seems unusable.
+
+See repo kube-gcp-deployment-docker for a working docker based version instead.
