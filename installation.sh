@@ -329,11 +329,12 @@ function configureMaster() {
   ${GSSH}${instance} -- sudo mv ca.pem ca-key.pem kubernetes-key.pem kubernetes.pem encryption-config.yaml /var/lib/kubernetes/
 
   INTERNAL_IP=$(gcloud compute instances describe ${instance} --format 'value(networkInterfaces[0].networkIP)')
+  PROJECT_ID=`gcloud config list|grep "project = "|awk '{print $3}'`
 
   cat > gce.conf <<EOF
 [global]
-project-id = adacado-kube-upgrade-17-test
-network-project-id = adacado-kube-upgrade-17-test
+project-id = ${PROJECT_ID}
+network-project-id = ${PROJECT_ID}
 network-name = ${CLUSTER_NAME}
 subnetwork-name = ${CLUSTER_NAME}
 node-tags = ${WORKER_NODE_PREFIX}
